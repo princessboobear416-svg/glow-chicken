@@ -12,18 +12,27 @@ const PORT = process.env.PORT || 3000;
 
 // ---- constants -------------------------------------------------------
 const WORLD_SIZE = 3000;
-const MAX_DOTS = 220;
-const DOT_RADIUS = 6;
+const MAX_DOTS = 450; // much denser field of dots
 const BASE_RADIUS = 20;
-const DOT_AREA_GAIN = 55; // area (not radius) added per dot eaten - gives natural diminishing growth
 const BASE_SPEED = 4.2; // world units per tick at base size
 const MIN_SPEED_FACTOR = 0.35; // biggest chickens never fully stop
 const TICK_MS = 50; // 20 ticks/sec
 const NAME_MAX_LEN = 16;
 const COLORS = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#9775fa', '#f783ac', '#63e6be'];
 
+// Dots come in tiers - bigger dots are rarer, glow a different color, and are
+// worth a lot more growth (area gain), so hunting down the big glowing ones
+// is worth the risk of crossing the map for them.
+const DOT_TIERS = [
+  { radius: 6, color: '#fff59d', areaGain: 55, weight: 58 }, // common - pale yellow
+  { radius: 10, color: '#4dabf7', areaGain: 140, weight: 24 }, // uncommon - blue
+  { radius: 15, color: '#9775fa', areaGain: 300, weight: 13 }, // rare - purple
+  { radius: 21, color: '#ff6b6b', areaGain: 550, weight: 5 }, // epic - red, biggest payoff
+];
+const DOT_WEIGHT_TOTAL = DOT_TIERS.reduce((sum, t) => sum + t.weight, 0);
+
 const players = new Map(); // ws -> player
-const dots = new Map(); // id -> {id, x, y}
+const dots = new Map(); // id -> {id, x, y, r, c, gain}
 let nextDotId = 1;
 
 function rand(min, max) {
@@ -34,9 +43,26 @@ function randomColor() {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
 }
 
+function pickDotTier() {
+  let roll = Math.random() * DOT_WEIGHT_TOTAL;
+  for (const tier of DOT_TIERS) {
+    roll -= tier.weight;
+    if (roll <= 0) return tier;
+  }
+  return DOT_TIERS[0];
+}
+
 function spawnDot() {
   const id = nextDotId++;
-  dots.set(id, { id, x: rand(20, WORLD_SIZE - 20), y: rand(20, WORLD_SIZE - 20) });
+  const tier = pickDotTier();
+  dots.set(id, {
+    id,
+    x: rand(20, WORLD_SIZE - 20),
+    y: rand(20, WORLD_SIZE - 20),
+    r: tier.radius,
+    c: tier.color,
+    gain: tier.areaGain,
+  });
 }
 
 function ensureDots() {
@@ -88,12 +114,13 @@ function tick() {
       }
     }
 
-    // Dot collisions
+    // Dot collisions - catch radius includes the dot's own size, so bigger
+    // (more valuable) dots are also a bit easier to reach.
     for (const dot of dots.values()) {
       const dist = Math.hypot(player.x - dot.x, player.y - dot.y);
-      if (dist < player.radius) {
+      if (dist < player.radius + dot.r) {
         dots.delete(dot.id);
-        player.radius = radiusFromArea(areaFromRadius(player.radius) + DOT_AREA_GAIN);
+        player.radius = radiusFromArea(areaFromRadius(player.radius) + dot.gain);
         player.score += 1;
       }
     }
@@ -185,4 +212,3 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`Glow Chicken listening on port ${PORT}`);
 });
-
