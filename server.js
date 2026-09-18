@@ -14,11 +14,23 @@ const PORT = process.env.PORT || 3000;
 const WORLD_SIZE = 3000;
 const MAX_DOTS = 450; // much denser field of dots
 const BASE_RADIUS = 20;
-const BASE_SPEED = 4.2; // world units per tick at base size
+const BASE_SPEED = 6.3; // world units per tick at base size (50% faster than the original 4.2)
 const MIN_SPEED_FACTOR = 0.35; // biggest chickens never fully stop
 const TICK_MS = 50; // 20 ticks/sec
 const NAME_MAX_LEN = 16;
 const COLORS = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#9775fa', '#f783ac', '#63e6be'];
+
+// ---- player-vs-player bumping ------------------------------------------
+// A bigger chicken that touches a smaller one "bumps" it: the smaller one
+// drops a quarter of its glow onto the map as a burst of collectible dots,
+// which the bumper (or anyone else nearby) can then scoop up. A short
+// immunity window after being bumped stops one big chicken from parked-on
+// top of a small one draining it every single tick.
+const BUMP_DROP_FRACTION = 0.25;
+const BUMP_IMMUNITY_MS = 1200;
+const MIN_PLAYER_RADIUS = 12; // a bumped chicken never shrinks below this
+const DROPPED_DOT_COLOR = '#ffffff';
+const DROPPED_DOT_RADIUS = 9;
 
 // Dots come in tiers - bigger dots are rarer, glow a different color, and are
 // worth a lot more growth (area gain), so hunting down the big glowing ones
@@ -70,6 +82,27 @@ function ensureDots() {
 }
 ensureDots();
 
+// Scatters a burst of white "dropped glow" dots around (x, y) whose combined
+// gain adds up to totalGain - this is how a bumped player's stolen glow
+// actually gets back onto the map for someone to pick up.
+function scatterDroppedGlow(x, y, totalGain) {
+  const count = Math.max(3, Math.min(10, Math.round(totalGain / 45)));
+  const gainEach = totalGain / count;
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spread = rand(10, 60);
+    const id = nextDotId++;
+    dots.set(id, {
+      id,
+      x: Math.max(10, Math.min(WORLD_SIZE - 10, x + Math.cos(angle) * spread)),
+      y: Math.max(10, Math.min(WORLD_SIZE - 10, y + Math.sin(angle) * spread)),
+      r: DROPPED_DOT_RADIUS,
+      c: DROPPED_DOT_COLOR,
+      gain: gainEach,
+    });
+  }
+}
+
 function radiusFromArea(area) {
   return Math.sqrt(area / Math.PI);
 }
@@ -88,6 +121,7 @@ function spawnPlayer(name, color) {
     radius: BASE_RADIUS,
     score: 0,
     joinedAt: Date.now(),
+    bumpImmuneUntil: 0,
   };
 }
 
@@ -123,6 +157,33 @@ function tick() {
         player.radius = radiusFromArea(areaFromRadius(player.radius) + dot.gain);
         player.score += 1;
       }
+    }
+  }
+
+  // Player-vs-player bumps: a bigger chicken touching a smaller one steals
+  // 25% of the smaller one's glow, dropped onto the map as pickups.
+  const playerArr = [...players.values()];
+  const now = Date.now();
+  for (let i = 0; i < playerArr.length; i++) {
+    for (let j = i + 1; j < playerArr.length; j++) {
+      const a = playerArr[i];
+      const b = playerArr[j];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (dist >= a.radius + b.radius) continue; // not touching
+
+      const bigger = a.radius >= b.radius ? a : b;
+      const smaller = bigger === a ? b : a;
+      if (bigger.radius <= smaller.radius) continue; // same size - no bump
+      if (now < smaller.bumpImmuneUntil) continue; // still recovering
+
+      const smallerArea = areaFromRadius(smaller.radius);
+      const floorArea = areaFromRadius(MIN_PLAYER_RADIUS);
+      const dropAmount = Math.min(smallerArea * BUMP_DROP_FRACTION, Math.max(0, smallerArea - floorArea));
+      if (dropAmount <= 0) continue;
+
+      smaller.radius = radiusFromArea(smallerArea - dropAmount);
+      smaller.bumpImmuneUntil = now + BUMP_IMMUNITY_MS;
+      scatterDroppedGlow(smaller.x, smaller.y, dropAmount);
     }
   }
 
