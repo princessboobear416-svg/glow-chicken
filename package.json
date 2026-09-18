@@ -1,0 +1,16 @@
+{
+  "name": "glow-chicken",
+  "version": "1.0.0",
+  "description": "Multiplayer .io-style game - grow your chicken by eating glowing dots.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
