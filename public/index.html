@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glow Chicken</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #ffd43b;
+    --accent2: #4dabf7;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+  }
+  #game-canvas { position: fixed; inset: 0; display: block; background: #0a0e14; }
+
+  #join-screen {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 30%, #1c2430 0%, #0a0e14 70%);
+  }
+  .join-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    padding: 32px 28px; width: min(90vw, 380px); text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .join-card h1 {
+    font-size: 32px; margin: 0 0 4px; letter-spacing: -0.5px;
+  }
+  .join-card h1 .egg { filter: drop-shadow(0 0 12px rgba(255,212,59,0.6)); }
+  .join-card p { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .join-card input {
+    width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border);
+    background: #0d1117; color: var(--text); font-size: 16px; margin-bottom: 14px;
+    outline: none;
+  }
+  .join-card input:focus { border-color: var(--accent2); }
+  .color-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .swatch {
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid transparent;
+  }
+  .swatch.selected { border-color: white; transform: scale(1.15); }
+  #play-btn {
+    width: 100%; padding: 14px; border-radius: 10px; border: none;
+    background: linear-gradient(135deg, var(--accent), #ffb347); color: #1a1200; font-weight: 700; font-size: 16px;
+    cursor: pointer; letter-spacing: 0.3px;
+  }
+  #play-btn:hover { filter: brightness(1.08); }
+  #play-btn:disabled { opacity: 0.5; cursor: default; }
+  .hint { margin-top: 14px; font-size: 12px; color: var(--muted); }
+
+  #hud {
+    position: fixed; top: 16px; left: 16px; z-index: 10; pointer-events: none;
+    font-size: 13px; color: var(--muted);
+  }
+  #hud .score { font-size: 22px; color: var(--text); font-weight: 700; }
+  #hud .score span { color: var(--accent); }
+
+  #leaderboard {
+    position: fixed; top: 16px; right: 16px; z-index: 10;
+    background: rgba(22,27,34,0.85); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 16px; min-width: 160px; backdrop-filter: blur(4px);
+  }
+  #leaderboard h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 8px; }
+  #leaderboard ol { margin: 0; padding: 0 0 0 18px; font-size: 13px; }
+  #leaderboard li { margin-bottom: 4px; }
+  #leaderboard li.me { color: var(--accent); font-weight: 700; }
+
+  #disconnected {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; background: rgba(10,14,20,0.9);
+    font-size: 18px; text-align: center; flex-direction: column; gap: 12px;
+  }
+  #disconnected button {
+    padding: 10px 20px; border-radius: 8px; border: none; background: var(--accent2); color: #06111c;
+    font-weight: 700; cursor: pointer;
+  }
+
+  @media (max-width: 480px) {
+    .join-card { padding: 24px 20px; }
+    #leaderboard { min-width: 120px; padding: 10px 12px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game-canvas"></canvas>
+
+<div id="hud">
+  <div class="score">Size: <span id="score-val">0</span></div>
+</div>
+
+<div id="leaderboard">
+  <h2>Top Chickens</h2>
+  <ol id="leaderboard-list"></ol>
+</div>
+
+<div id="join-screen">
+  <div class="join-card">
+    <h1><span class="egg">🐔</span> Glow Chicken</h1>
+    <p>Eat the glowing dots. Get bigger. Watch out for bigger chickens.</p>
+    <input id="name-input" type="text" placeholder="Your chicken's name" maxlength="16" autocomplete="off">
+    <div class="color-row" id="color-row"></div>
+    <button id="play-btn">Hatch &amp; Play</button>
+    <div class="hint">Move your mouse (or drag on mobile) to steer. Others can join with this same link.</div>
+  </div>
+</div>
+
+<div id="disconnected">
+  <div>🐣 Lost connection to the coop.</div>
+  <button onclick="location.reload()">Reconnect</button>
+</div>
+
+<script>
+(function () {
+  const COLORS = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#9775fa', '#f783ac', '#63e6be'];
+  const canvas = document.getElementById('game-canvas');
+  const ctx = canvas.getContext('2d');
+  const joinScreen = document.getElementById('join-screen');
+  const nameInput = document.getElementById('name-input');
+  const colorRow = document.getElementById('color-row');
+  const playBtn = document.getElementById('play-btn');
+  const scoreVal = document.getElementById('score-val');
+  const leaderboardList = document.getElementById('leaderboard-list');
+  const disconnectedEl = document.getElementById('disconnected');
+
+  let selectedColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+  COLORS.forEach((c) => {
+    const el = document.createElement('div');
+    el.className = 'swatch' + (c === selectedColor ? ' selected' : '');
+    el.style.background = c;
+    el.addEventListener('click', () => {
+      selectedColor = c;
+      [...colorRow.children].forEach((s) => s.classList.remove('selected'));
+      el.classList.add('selected');
+    });
+    colorRow.appendChild(el);
+  });
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const savedName = localStorage.getItem('glowChickenName');
+  if (savedName) nameInput.value = savedName;
+
+  let ws = null;
+  let myId = null;
+  let worldSize = 3000;
+  let players = [];
+  let dots = [];
+  let myPlayer = null; // last known state for camera
+  let mouseX = window.innerWidth / 2;
+  let mouseY = window.innerHeight / 2;
+  let hasControl = false;
+
+  function connect(name, color) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({ t: 'join', name, color }));
+    });
+    ws.addEventListener('message', (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.t === 'welcome') {
+        myId = msg.id;
+        worldSize = msg.worldSize;
+        hasControl = true;
+      } else if (msg.t === 'state') {
+        players = msg.players;
+        dots = msg.dots;
+        myPlayer = players.find((p) => p.id === myId) || myPlayer;
+        updateHud();
+      }
+    });
+    ws.addEventListener('close', () => {
+      if (hasControl) disconnectedEl.style.display = 'flex';
+    });
+    ws.addEventListener('error', () => {});
+  }
+
+  playBtn.addEventListener('click', startGame);
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') startGame(); });
+
+  function startGame() {
+    const name = (nameInput.value || 'Chicken').trim().slice(0, 16) || 'Chicken';
+    localStorage.setItem('glowChickenName', name);
+    joinScreen.style.display = 'none';
+    connect(name, selectedColor);
+    requestAnimationFrame(loop);
+  }
+
+  // ---- input: mouse steers a target point in screen space --------------
+  canvas.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches[0]) {
+      mouseX = e.touches[0].clientX;
+      mouseY = e.touches[0].clientY;
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  let lastSend = 0;
+  function sendInput() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !myPlayer) return;
+    const now = performance.now();
+    if (now - lastSend < 50) return; // ~20/s
+    lastSend = now;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const zoom = currentZoom();
+    const worldX = myPlayer.x + (mouseX - cx) / zoom;
+    const worldY = myPlayer.y + (mouseY - cy) / zoom;
+    ws.send(JSON.stringify({ t: 'input', x: worldX, y: worldY }));
+  }
+
+  function currentZoom() {
+    if (!myPlayer) return 1;
+    const base = 1;
+    const z = 22 / Math.max(22, myPlayer.r);
+    return Math.max(0.4, Math.min(1, z));
+  }
+
+  function updateHud() {
+    if (myPlayer) scoreVal.textContent = Math.round(myPlayer.r);
+    const sorted = [...players].sort((a, b) => b.r - a.r).slice(0, 5);
+    leaderboardList.innerHTML = sorted
+      .map((p) => `<li class="${p.id === myId ? 'me' : ''}">${escapeHtml(p.name)} - ${Math.round(p.r)}</li>`)
+      .join('') || '<li>No chickens yet</li>';
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function drawGrid(zoom, camX, camY) {
+    const gridSize = 100;
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    const startX = Math.floor((camX - canvas.width / 2 / zoom) / gridSize) * gridSize;
+    const endX = camX + canvas.width / 2 / zoom;
+    const startY = Math.floor((camY - canvas.height / 2 / zoom) / gridSize) * gridSize;
+    const endY = camY + canvas.height / 2 / zoom;
+    for (let x = startX; x < endX; x += gridSize) {
+      const sx = (x - camX) * zoom + canvas.width / 2;
+      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
+    }
+    for (let y = startY; y < endY; y += gridSize) {
+      const sy = (y - camY) * zoom + canvas.height / 2;
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(canvas.width, sy); ctx.stroke();
+    }
+  }
+
+  function loop() {
+    requestAnimationFrame(loop);
+    sendInput();
+    if (!myPlayer) return;
+
+    const zoom = currentZoom();
+    const camX = myPlayer.x;
+    const camY = myPlayer.y;
+
+    ctx.fillStyle = '#0a0e14';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawGrid(zoom, camX, camY);
+
+    // World border
+    ctx.strokeStyle = 'rgba(255,107,107,0.5)';
+    ctx.lineWidth = 4;
+    const bx = (0 - camX) * zoom + canvas.width / 2;
+    const by = (0 - camY) * zoom + canvas.height / 2;
+    ctx.strokeRect(bx, by, worldSize * zoom, worldSize * zoom);
+
+    // Dots (glowing)
+    for (const d of dots) {
+      const sx = (d.x - camX) * zoom + canvas.width / 2;
+      const sy = (d.y - camY) * zoom + canvas.height / 2;
+      if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) continue;
+      ctx.save();
+      ctx.shadowColor = '#fff9c4';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#fff59d';
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.max(3, 6 * zoom), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Players (sorted small-to-big so big ones draw on top)
+    const sortedPlayers = [...players].sort((a, b) => a.r - b.r);
+    for (const p of sortedPlayers) {
+      const sx = (p.x - camX) * zoom + canvas.width / 2;
+      const sy = (p.y - camY) * zoom + canvas.height / 2;
+      const r = p.r * zoom;
+
+      ctx.save();
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = p.id === myId ? 24 : 10;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = p.color + '33';
+      ctx.fill();
+      ctx.lineWidth = p.id === myId ? 3 : 2;
+      ctx.strokeStyle = p.color;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.font = `${Math.max(14, r * 1.3)}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🐔', sx, sy);
+
+      ctx.font = '13px Segoe UI, sans-serif';
+      ctx.fillStyle = p.id === myId ? '#ffd43b' : '#e6edf3';
+      ctx.fillText(p.name, sx, sy - r - 10);
+    }
+  }
+})();
+</script>
+
+</body>
+</html>
