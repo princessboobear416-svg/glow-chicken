@@ -287,17 +287,19 @@
     const by = (0 - camY) * zoom + canvas.height / 2;
     ctx.strokeRect(bx, by, worldSize * zoom, worldSize * zoom);
 
-    // Dots (glowing)
+    // Dots (glowing) - bigger tiers glow brighter and wider, since they're worth more
     for (const d of dots) {
       const sx = (d.x - camX) * zoom + canvas.width / 2;
       const sy = (d.y - camY) * zoom + canvas.height / 2;
-      if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) continue;
+      const baseR = d.r || 6;
+      const dr = Math.max(3, baseR * zoom);
+      if (sx < -dr - 20 || sx > canvas.width + dr + 20 || sy < -dr - 20 || sy > canvas.height + dr + 20) continue;
       ctx.save();
-      ctx.shadowColor = '#fff9c4';
-      ctx.shadowBlur = 14;
-      ctx.fillStyle = '#fff59d';
+      ctx.shadowColor = d.c || '#fff9c4';
+      ctx.shadowBlur = 10 + baseR;
+      ctx.fillStyle = d.c || '#fff59d';
       ctx.beginPath();
-      ctx.arc(sx, sy, Math.max(3, 6 * zoom), 0, Math.PI * 2);
+      ctx.arc(sx, sy, dr, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
